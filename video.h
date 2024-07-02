@@ -64,4 +64,8 @@ void video_core_description(char *str, size_t len);
 void video_scaler_description(char *str, size_t len);
 char* video_get_core_mode_name(int with_vrefresh = 1);
 
+// autofire timings
+
+extern void set_refresh(uint32_t);
+
 #endif // VIDEO_H

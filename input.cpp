@@ -17,6 +17,8 @@
 #include <sys/types.h>
 #include <stdarg.h>
 #include <math.h>
+#include <time.h>
+#include <stdint.h>
 
 #include "input.h"
 #include "user_io.h"
@@ -36,6 +38,10 @@
 #define NUMDEV 30
 #define NUMPLAYERS 6
 #define UINPUT_NAME "MiSTer virtual input"
+
+long refresh = 100000000.0f / 60; // default to 60hz
+static uint32_t framecount = 0;
+static struct timespec af_timer;
 
 char joy_bnames[NUMBUTTONS][32] = {};
 int  joy_bcount = 0;
@@ -1646,7 +1652,7 @@ static int kbd_toggle = 0;
 static uint64_t joy[NUMPLAYERS] = {};		// 0-31 primary mappings, 32-64 alternate
 static uint64_t autofire[NUMPLAYERS] = {};	// 0-31 primary mappings, 32-64 alternate
 static uint32_t autofirecodes[NUMPLAYERS][BTN_NUM] = {};
-static int af_delay[NUMPLAYERS] = {};
+//static int af_delay[NUMPLAYERS] = {};
 
 static uint32_t crtgun_timeout[NUMDEV] = {};
 
@@ -1667,10 +1673,11 @@ static uint32_t mouse_timer = 0;
 #define BTN_TGL 100
 #define BTN_OSD 101
 
-#define AF_MIN  16
-#define AF_MAX  512
-#define AF_STEP 8
+//#define AF_MIN  16
+//#define AF_MAX  512
+//#define AF_STEP 8
 
+static uint af_rate[NUMPLAYERS] = {2,2,2,2,2,2};
 static int uinp_fd = -1;
 static int input_uinp_setup()
 {
@@ -1842,7 +1849,9 @@ static void joy_apply_deadzone(int* x, int* y, const devInput* dev, const int st
 static uint32_t osdbtn = 0;
 static void joy_digital(int jnum, uint64_t mask, uint32_t code, char press, int bnum, int dont_save = 0)
 {
-	static char str[128];
+	//uint af_rates[] = {2,3,4};
+
+	static char str[256];
 	static uint32_t lastcode[NUMPLAYERS];
 	static uint64_t lastmask[NUMPLAYERS];
 	int num = jnum - 1;
@@ -1891,41 +1900,47 @@ static void joy_digital(int jnum, uint64_t mask, uint32_t code, char press, int 
 
 						if (hasAPI1_5())
 						{
-							if (!found) sprintf(str, "Auto fire: %dms (%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
-							else sprintf(str, "Auto fire: OFF");
+							if (!found) sprintf(str, "Autofire: %.1dhz (actual: %.2fhz)", 60 / (af_rate[num] * 2), (1000000000.0f / (get_refresh()) / (af_rate[num] * 2)));
+							//if (!found) sprintf(str, "Auto fire: %dms (%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
+							else sprintf(str, "Autofire: OFF");
 							Info(str);
 						}
-						else InfoMessage((!found) ? "\n\n          Auto fire\n             ON" :
-							"\n\n          Auto fire\n             OFF");
+						else InfoMessage((!found) ? "\n\n          Autofire\n             ON" :
+							"\n\n          Autofire\n             OFF");
 
 						return;
 					}
 					else if (lastmask[num] & 0xF)
 					{
+						
 						if (lastmask[num] & 9)
 						{
-							af_delay[num] += AF_STEP << ((lastmask[num] & 1) ? 1 : 0);
-							if (af_delay[num] > AF_MAX) af_delay[num] = AF_MAX;
+							if (af_rate[num] > 1) af_rate[num]--;
+							//af_delay[num] += AF_STEP << ((lastmask[num] & 1) ? 1 : 0);
+							//if (af_delay[num] > AF_MAX) af_delay[num] = AF_MAX;
 						}
 						else
 						{
-							af_delay[num] -= AF_STEP << ((lastmask[num] & 2) ? 1 : 0);
-							if (af_delay[num] < AF_MIN) af_delay[num] = AF_MIN;
+							if (af_rate[num] < 5) af_rate[num]++;
+							//af_delay[num] -= AF_STEP << ((lastmask[num] & 2) ? 1 : 0);
+							//if (af_delay[num] < AF_MIN) af_delay[num] = AF_MIN;
 						}
 
 						static char str[256];
 
 						if (hasAPI1_5())
 						{
-							sprintf(str, "Auto fire period: %dms (%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
+							sprintf(str, "Autofire: %.1dhz (actual %.2fhz)", 60 / (af_rate[num] * 2), (1000000000.0f / (get_refresh()) / (af_rate[num] * 2)));
+							//sprintf(str, "Auto fire period: %dms (%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
 							Info(str);
 						}
 						else
 						{
-							sprintf(str, "\n\n       Auto fire period\n            %dms(%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
+							sprintf(str, "\n\n       Autofire\n            %.1dhz (actual %.2fhz)", 60 / (af_rate[num] * 2),  (1000000000.0f / (get_refresh()) / (af_rate[num] * 2)));
+							//sprintf(str, "\n\n       Auto fire period\n            %dms(%uhz)", af_delay[num] * 2, 1000 / (af_delay[num] * 2));
 							InfoMessage(str);
 						}
-
+						
 						return;
 					}
 				}
@@ -4595,6 +4610,8 @@ int input_test(int getchar)
 	struct input_absinfo absinfo;
 	struct input_event ev;
 	static uint32_t timeout = 0;
+	
+	inc_framecount(); // frame counter for autofire
 
 	if (touch_rel && CheckTimer(touch_rel))
 	{
@@ -5665,9 +5682,11 @@ int input_poll(int getchar)
 	PROFILE_FUNCTION();
 
 	static int af[NUMPLAYERS] = {};
-	static uint32_t time[NUMPLAYERS] = {};
+	//static uint32_t time[NUMPLAYERS] = {};
+	static uint32_t af_frame[NUMPLAYERS] = {};
 	static uint64_t joy_prev[NUMPLAYERS] = {};
 
+	//if (inc_framecount()) printf("framecount: %u\n",get_framecount());
 	int ret = input_test(getchar);
 	if (getchar) return ret;
 
@@ -5704,9 +5723,9 @@ int input_poll(int getchar)
 	{
 		for (int i = 0; i < NUMPLAYERS; i++)
 		{
-			if (af_delay[i] < AF_MIN) af_delay[i] = AF_MIN;
-
-			if (!time[i]) time[i] = GetTimer(af_delay[i]);
+			//if (af_delay[i] < AF_MIN) af_delay[i] = AF_MIN;
+			//if (!af_frame[i]) af_frame[i] = (get_framecount() + af_rate[i]) % 60;
+			//if (!time[i]) time[i] = GetTimer(af_delay[i]);
 			int send = 0;
 			int newdir = ((((uint32_t)(joy[i]) | (uint32_t)(joy[i] >> 32)) & 0xF) != (((uint32_t)(joy_prev[i]) | (uint32_t)(joy_prev[i] >> 32)) & 0xF));
 			
@@ -5714,7 +5733,8 @@ int input_poll(int getchar)
 			{
 				if ((joy[i] ^ joy_prev[i]) & autofire[i])
 				{
-					time[i] = GetTimer(af_delay[i]);
+					//time[i] = GetTimer(af_delay[i]);
+					af_frame[i] = (get_framecount() + af_rate[i] * 2) % 60;
 					af[i] = 0;
 				}
 
@@ -5722,9 +5742,9 @@ int input_poll(int getchar)
 				joy_prev[i] = joy[i];
 			}
 
-			if (CheckTimer(time[i]))
+			if (af_frame[i] == get_framecount())
 			{
-				time[i] = GetTimer(af_delay[i]);
+				af_frame[i] = (get_framecount() + af_rate[i]) % 60;
 				af[i] = !af[i];
 				if (joy[i] & autofire[i]) send = 1;
 			}
@@ -5890,4 +5910,54 @@ void parse_buttons()
 		if (!joy_bnames[n][0]) break;
 		joy_bcount++;
 	}
+}
+
+// autofire timings
+
+void set_refresh(long rate)
+{
+	if (rate) refresh = rate;
+}
+
+bool operator <(const timespec& lhs, const timespec& rhs)
+{
+    if (lhs.tv_sec == rhs.tv_sec)
+        return lhs.tv_nsec < rhs.tv_nsec;
+    else
+        return lhs.tv_sec < rhs.tv_sec;
+}
+
+uint inc_framecount()
+{
+	struct timespec tp;
+	clock_gettime(CLOCK_BOOTTIME, &tp);
+	static struct timespec prev_tp;
+	if (af_timer < tp)
+	{
+		++framecount;
+		af_timer.tv_sec = tp.tv_sec;
+		af_timer.tv_nsec = tp.tv_nsec + get_refresh();
+		if (framecount > 59) framecount = 0;
+		/*
+		printf("prev_.ts: %ld prev_.tns: %.2f refresh: %ld\n", prev_tp.tv_sec, prev_tp.tv_nsec / 100000.0f, get_refresh());
+		printf("clock.ts: %ld clock.tns: %.2f refresh: %ld\n", tp.tv_sec, tp.tv_nsec / 1000000.0f, get_refresh());
+		printf("timer.ts: %ld timer.tns: %.2f refresh: %ld\n", af_timer.tv_sec, af_timer.tv_nsec / 1000000.0f, get_refresh());
+		printf("difference: %.2fms\n", (tp.tv_nsec - prev_tp.tv_nsec) / 1000000.0f);
+		printf("\n");
+		*/
+		prev_tp = tp;
+		
+		return 1;
+	}
+	return 0;
+}
+
+uint32_t get_framecount()
+{
+	return framecount;
+}
+
+long get_refresh()
+{
+	return refresh;
 }

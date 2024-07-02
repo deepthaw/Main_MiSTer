@@ -2882,6 +2882,7 @@ void video_mode_adjust()
 	if (vid_changed || force)
 	{
 		current_video_info = video_info;
+		set_refresh((long)current_video_info.vtime * 10);
 		show_video_info(&video_info, &v_cur);
 		set_yc_mode();
 		if (cfg.direct_video) spd_config_dv();

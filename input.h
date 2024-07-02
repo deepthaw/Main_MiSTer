@@ -114,4 +114,9 @@ void parse_buttons();
 char *get_buttons(int type = 0);
 void set_ovr_buttons(char *s, int type);
 
+// autofire timing
+void set_refresh(long);
+uint inc_framecount();
+uint32_t get_framecount();
+long get_refresh();
 #endif
